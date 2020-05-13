@@ -8,13 +8,48 @@
 
 import UIKit
 
-class ViewController: UIViewController {
+final class Cell: InfiniteScrollViewCell {
+    @IBOutlet private weak var textLabel: UILabel!
+
+    func set(text: String) {
+        textLabel.text = text
+    }
+}
+
+final class ViewController: UIViewController {
+    @IBOutlet private weak var infiniteScrollView: InfiniteScrollView! {
+        didSet {
+            let nib = UINib(nibName: "Cell", bundle: Bundle.main)
+            infiniteScrollView.register(nib: nib, for: Cell.self)
+            infiniteScrollView.dataSource = self
+            infiniteScrollView.delegate = self
+        }
+    }
+
+    private let data: [Int] = Array(0..<20)
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.
     }
 
-
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        infiniteScrollView.reloadData()
+    }
 }
 
+extension ViewController: InfiniteScrollViewDataSource {
+    func numberOfRowsInInfiniteScrollView(_ infiniteScrollView: InfiniteScrollView) -> Int {
+        return data.count
+    }
+
+    func infiniteScrollView(_ infiniteScrollView: InfiniteScrollView, cellForRowAt index: Int) -> InfiniteScrollViewCell {
+        let cell: Cell = infiniteScrollView.dequeueReusableCell()
+        cell.set(text: "\(index)")
+        return cell
+    }
+}
+
+extension ViewController: InfiniteScrollViewDelegate {
+
+}
