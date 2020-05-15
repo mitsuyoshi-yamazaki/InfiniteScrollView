@@ -40,6 +40,9 @@ open class InfiniteScrollView: UIScrollView {
     var visibleCells: [InfiniteScrollViewCell] {
         return Array(cells.values)
     }
+    var visibleTopCell: InfiniteScrollViewCell? {
+        return visibleCells.sorted { $0.frame.origin.y < $1.frame.origin.y }.first
+    }
 
     private let contentView = UIView()
 
@@ -54,11 +57,13 @@ open class InfiniteScrollView: UIScrollView {
             guard cellAnchorConstraint !== oldValue else {
                 return
             }
-            cellAnchorConstraint?.isActive = true
             oldValue?.isActive = false
+            cellAnchorConstraint?.isActive = true
         }
     }
     private var isReloading = false
+    private var previousOrientation: UIInterfaceOrientation?
+    private var topCellToTopEdge: CGFloat?
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -72,11 +77,19 @@ open class InfiniteScrollView: UIScrollView {
 
     open override func layoutSubviews() {
         super.layoutSubviews()
-        // TODO:
+
+        if let orientation = self.window?.windowScene?.interfaceOrientation, orientation != previousOrientation, let topCellToTopEdge = topCellToTopEdge {
+            cellAnchorConstraint = visibleTopCell?.topAnchor.constraint(equalTo: contentView.topAnchor, constant: frame.height - topCellToTopEdge)
+            contentOffset = CGPoint(x: 0.0, y: frame.height)
+            setNeedsLayout()
+            previousOrientation = orientation
+            // FixMe: Rotate to landscape -> scroll down 1px -> rotate to portrait
+        }
     }
 
     open override func didMoveToWindow() {
         super.didMoveToWindow()
+        previousOrientation = window?.windowScene?.interfaceOrientation
         reloadData()
     }
 }
@@ -179,11 +192,17 @@ private extension InfiniteScrollView {
         previousOffsetY = contentOffset.y
 
         let contentOffsetObservation = observe(\.contentOffset, options: .new) { [weak self] _, change in
-            guard let self = self, let contentOffset = change.newValue else {
+            guard
+                let self = self,
+                let contentOffset = change.newValue,
+                let orientation = self.window?.windowScene?.interfaceOrientation,
+                orientation == self.previousOrientation
+            else {
                 return
             }
+            self.topCellToTopEdge = self.visibleTopCell.map { contentOffset.y - $0.frame.origin.y }
             self.didScroll()
-            print("\(contentOffset.y)")
+            print("offset: \(contentOffset.y), orientation: \(self.window?.windowScene?.interfaceOrientation.rawValue)")
         }
         observations.append(contentOffsetObservation)
     }
