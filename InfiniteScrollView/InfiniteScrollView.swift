@@ -16,9 +16,11 @@ public protocol InfiniteScrollViewDataSource: class {
 }
 
 public protocol InfiniteScrollViewDelegate: class, UIScrollViewDelegate {
+    func infiniteScrollViewDidReload(_ infiniteScrollView: InfiniteScrollView)
 }
 
 public extension InfiniteScrollViewDelegate {
+    func infiniteScrollViewDidReload(_ infiniteScrollView: InfiniteScrollView) {}
 }
 
 open class InfiniteScrollView: UIScrollView {
@@ -35,14 +37,28 @@ open class InfiniteScrollView: UIScrollView {
         }
     }
 
-    public var offset: CGFloat = 0.0
+    var visibleCells: [InfiniteScrollViewCell] {
+        return Array(cells.values)
+    }
 
     private let contentView = UIView()
 
-    private var previousContentOffsetY: CGFloat = 0.0
-    private var contentOffsetObservation: NSKeyValueObservation?
+    private var previousOffsetY: CGFloat = 0.0
+    private var observations: [NSKeyValueObservation] = []
     private var cellNibs: [String: UINib] = [:]
     private var queuingCells: Set<InfiniteScrollViewCell> = []
+    private var cells: [Int: InfiniteScrollViewCell] = [:]
+    private var numberOfRows = 0
+    private var cellAnchorConstraint: NSLayoutConstraint? {
+        didSet {
+            guard cellAnchorConstraint !== oldValue else {
+                return
+            }
+            cellAnchorConstraint?.isActive = true
+            oldValue?.isActive = false
+        }
+    }
+    private var isReloading = false
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -54,34 +70,61 @@ open class InfiniteScrollView: UIScrollView {
         setup()
     }
 
-    public func reloadData() {  // TODO: Automatically reload data when it's addedd to a window
-        guard let numberOfRows = dataSource?.numberOfRowsInInfiniteScrollView(self), numberOfRows > 0, let dataSource = dataSource else {
-            removeAllCells()
+    open override func layoutSubviews() {
+        super.layoutSubviews()
+        // TODO:
+    }
+
+    open override func didMoveToWindow() {
+        super.didMoveToWindow()
+        reloadData()
+    }
+
+    public func reloadData() {
+        guard isReloading == false else {
             return
         }
+        isReloading = true
+        guard let numberOfRows = dataSource?.numberOfRowsInInfiniteScrollView(self), numberOfRows > 0, let dataSource = dataSource else {
+            removeAllCells()
+            infiniteScrollViewDelegate?.infiniteScrollViewDidReload(self)
+            isReloading = false
+            return
+        }
+        self.numberOfRows = numberOfRows
 
         // FixMe: Inherit previous offset
-        offset = 0.0
         contentOffset = CGPoint(x: 0.0, y: frame.height)
-        previousContentOffsetY = contentOffset.y
+        previousOffsetY = contentOffset.y
 
-        var previousCell = dataSource.infiniteScrollView(self, cellForRowAt: 0)
+        var previousCell = dataSource.infiniteScrollView(self, cellForRowAt: numberOfRows - 1)
         contentView.addSubview(previousCell)
-        previousCell.topAnchor.constraint(equalTo: contentView.topAnchor, constant: frame.height).isActive = true
+        cellAnchorConstraint = previousCell.bottomAnchor.constraint(equalTo: contentView.topAnchor, constant: frame.height)
         previousCell.leadingAnchor.constraint(equalTo: contentView.leadingAnchor).isActive = true
         previousCell.trailingAnchor.constraint(equalTo: contentView.trailingAnchor).isActive = true
+        cells[numberOfRows - 1] = previousCell
 
-        (1..<numberOfRows).forEach { index in
+        var visibleHeight: CGFloat = 0.0
+
+        for index in (0..<(numberOfRows - 1)) {
+            guard visibleHeight < frame.height else {
+                break
+            }
             let cell = dataSource.infiniteScrollView(self, cellForRowAt: index)
             contentView.addSubview(cell)
             cell.topAnchor.constraint(equalTo: previousCell.bottomAnchor).isActive = true
             cell.leadingAnchor.constraint(equalTo: contentView.leadingAnchor).isActive = true
             cell.trailingAnchor.constraint(equalTo: contentView.trailingAnchor).isActive = true
 
+            cells[index] = cell
             previousCell = cell
+            visibleHeight += cell.frame.height
+            print("Cell \(index) frame: \(cell.frame), \(visibleHeight)")
         }
-
+        setNeedsLayout()
         layoutIfNeeded()
+        infiniteScrollViewDelegate?.infiniteScrollViewDidReload(self)
+        isReloading = false
     }
 
     public func register<Cell: InfiniteScrollViewCell>(nib: UINib, for cellType: Cell.Type) {
@@ -128,36 +171,28 @@ private extension InfiniteScrollView {
         contentView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
         contentView.heightAnchor.constraint(equalTo: heightAnchor, multiplier: 3.0).isActive = true
 
-        let dummyView = UIView()
-        dummyView.backgroundColor = UIColor.red
-        contentView.addSubview(dummyView)
-        dummyView.translatesAutoresizingMaskIntoConstraints = false
-        dummyView.widthAnchor.constraint(equalToConstant: 80.0).isActive = true
-        dummyView.heightAnchor.constraint(equalToConstant: 80.0).isActive = true
-        dummyView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor).isActive = true
-        dummyView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor).isActive = true
-
-        offset = 0.0
         contentOffset = CGPoint(x: 0.0, y: frame.height)
-        previousContentOffsetY = contentOffset.y
+        previousOffsetY = contentOffset.y
 
-        contentOffsetObservation = observe(\.contentOffset, options: .new) { [weak self] _, change in
+        let contentOffsetObservation = observe(\.contentOffset, options: .new) { [weak self] _, change in
             guard let self = self, let contentOffset = change.newValue else {
                 return
             }
+            self.didScroll()
             print("\(contentOffset.y)")
+        }
+        observations.append(contentOffsetObservation)
+    }
 
-            let y = contentOffset.y
-            let height = self.frame.height
-
-            self.offset += y - self.previousContentOffsetY
-            self.previousContentOffsetY = y
-
-            if y < (height * 0.5) {
-                self.contentOffset = CGPoint(x: 0.0, y: y + height)
-            } else if y > (height * 1.5) {
-                self.contentOffset = CGPoint(x: 0.0, y: y - height)
+    func visibleCells(`for` rect: CGRect) -> [InfiniteScrollViewCell] {
+        func isVisible(view: UIView) -> Bool {
+            return view.frame.intersects(rect)
+        }
+        return contentView.subviews.compactMap { subview -> InfiniteScrollViewCell? in
+            guard let cell = subview as? InfiniteScrollViewCell else {
+                return nil
             }
+            return isVisible(view: cell) ? cell : nil
         }
     }
 
@@ -174,5 +209,112 @@ private extension InfiniteScrollView {
         cell.isHidden = true
         cell.removeFromSuperview()
         queuingCells.insert(cell)
+    }
+
+    func didScroll() {
+        defer {
+            if isReloading {
+            } else if y < (height * 0.5) {
+                let newOffset = y + height
+                DispatchQueue.main.async {
+                    self.contentOffset = CGPoint(x: 0.0, y: newOffset)
+                }
+                previousOffsetY = newOffset
+                cellAnchorConstraint?.constant += height
+                setNeedsLayout()
+            } else if y > (height * 1.5) {
+                let newOffset = y - height
+                DispatchQueue.main.async {
+                    self.contentOffset = CGPoint(x: 0.0, y: newOffset)
+                }
+                previousOffsetY = newOffset
+                cellAnchorConstraint?.constant -= height
+                setNeedsLayout()
+            } else {
+                previousOffsetY = y
+            }
+
+            layoutIfNeeded()
+        }
+
+        let y = contentOffset.y
+        let height = frame.height
+        guard isReloading == false, y != previousOffsetY else {
+            return
+        }
+        let visibleRect = CGRect(x: 0.0, y: y, width: frame.width, height: height)
+        let visibleCells = self.visibleCells(for: visibleRect).sorted { $0.frame.origin.y < $1.frame.origin.y }
+        let cellsToEnqueue = cells.filter { visibleCells.contains($0.value) == false }
+
+        if y < previousOffsetY {
+            // Scrolling down
+            let bottomCell = visibleCells.last { cellsToEnqueue.values.contains($0) == false }!  // FixMe:
+            if cellsToEnqueue.isEmpty == false {
+                cellAnchorConstraint = bottomCell.topAnchor.constraint(equalTo: contentView.topAnchor, constant: bottomCell.frame.origin.y)
+                cellsToEnqueue.forEach {
+                    self.cells.removeValue(forKey: $0.key)
+                    self.enqueue(cell: $0.value)
+                }
+                setNeedsLayout()
+            }
+
+            var previousCell: InfiniteScrollViewCell = visibleCells.first!   // FixMe:
+            var contentTop = previousCell.frame.origin.y
+            let visibleTop = y
+            guard var index = cells.min(by: { lhs, rhs in lhs.value.frame.origin.y < rhs.value.frame.origin.y })?.key, let dataSource = dataSource else {
+                return
+            }
+
+            while contentTop > visibleTop {   // FixMe: CAUSES INFINITE LOOP
+                index = (index - 1 + numberOfRows) % numberOfRows
+
+                let cell = dataSource.infiniteScrollView(self, cellForRowAt: index)
+                contentView.addSubview(cell)
+                cell.bottomAnchor.constraint(equalTo: previousCell.topAnchor).isActive = true
+                cell.leadingAnchor.constraint(equalTo: contentView.leadingAnchor).isActive = true
+                cell.trailingAnchor.constraint(equalTo: contentView.trailingAnchor).isActive = true
+
+                cells[index] = cell
+                previousCell = cell
+                contentTop -= cell.frame.height
+                print("Update cell \(index) frame: \(cell.frame), \(contentTop)")
+                setNeedsLayout()
+            }
+
+        } else {
+            // Scrolling up
+            let topCell = visibleCells.first { cellsToEnqueue.values.contains($0) == false }!  // FixMe:
+            if cellsToEnqueue.isEmpty == false {
+                cellAnchorConstraint = topCell.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topCell.frame.origin.y)
+                cellsToEnqueue.forEach {
+                    self.cells.removeValue(forKey: $0.key)
+                    self.enqueue(cell: $0.value)
+                }
+                setNeedsLayout()
+            }
+
+            var previousCell: InfiniteScrollViewCell = visibleCells.last!   // FixMe:
+            var contentBottom = previousCell.frame.origin.y + previousCell.frame.height
+            let visibleBottom = y + frame.height
+            guard var index = cells.max(by: { lhs, rhs in lhs.value.frame.origin.y < rhs.value.frame.origin.y })?.key, let dataSource = dataSource else {
+                return
+            }
+
+            while contentBottom < visibleBottom {   // FixMe: CAUSES INFINITE LOOP
+                index = (index + 1) % numberOfRows
+
+                let cell = dataSource.infiniteScrollView(self, cellForRowAt: index)
+                contentView.addSubview(cell)
+                cell.topAnchor.constraint(equalTo: previousCell.bottomAnchor).isActive = true
+                cell.leadingAnchor.constraint(equalTo: contentView.leadingAnchor).isActive = true
+                cell.trailingAnchor.constraint(equalTo: contentView.trailingAnchor).isActive = true
+
+                cells[index] = cell
+                previousCell = cell
+                contentBottom += cell.frame.height
+                print("Update cell \(index) frame: \(cell.frame), \(contentBottom)")
+                setNeedsLayout()
+            }
+        }
     }
 }

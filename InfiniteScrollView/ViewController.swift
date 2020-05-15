@@ -26,15 +26,17 @@ final class ViewController: UIViewController {
         }
     }
 
-    private let data: [Int] = Array(0..<20)
+    private let data: [UIColor] = {
+        let numberOfRows = 20
+        let data = (0..<numberOfRows).map { index -> UIColor in
+            let value = CGFloat(index + 1) / CGFloat(numberOfRows + 2)
+            return UIColor(red: value, green: 0.0, blue: 1 - value, alpha: 1.0)
+        }
+        return data + data.reversed().dropFirst().dropLast()
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        infiniteScrollView.reloadData()
     }
 }
 
@@ -45,6 +47,8 @@ extension ViewController: InfiniteScrollViewDataSource {
 
     func infiniteScrollView(_ infiniteScrollView: InfiniteScrollView, cellForRowAt index: Int) -> InfiniteScrollViewCell {
         let cell: Cell = infiniteScrollView.dequeueReusableCell()
+        let color = data[index]
+        cell.backgroundColor = color
         cell.set(text: "\(index)")
         return cell
     }
