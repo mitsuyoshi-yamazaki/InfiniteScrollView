@@ -35,6 +35,10 @@ final class ViewController: UIViewController {
         return data + data.reversed().dropFirst().dropLast()
     }()
 
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .lightContent
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
     }

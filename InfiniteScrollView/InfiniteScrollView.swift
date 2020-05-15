@@ -79,6 +79,7 @@ open class InfiniteScrollView: UIScrollView {
         super.layoutSubviews()
 
         if let orientation = self.window?.windowScene?.interfaceOrientation, orientation != previousOrientation, let topCellToTopEdge = topCellToTopEdge {
+            // Keep top cell position after rotation
             cellAnchorConstraint = visibleTopCell?.topAnchor.constraint(equalTo: contentView.topAnchor, constant: frame.height - topCellToTopEdge)
             contentOffset = CGPoint(x: 0.0, y: frame.height)
             setNeedsLayout()
