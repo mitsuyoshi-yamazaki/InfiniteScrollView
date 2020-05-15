@@ -79,8 +79,11 @@ open class InfiniteScrollView: UIScrollView {
         super.didMoveToWindow()
         reloadData()
     }
+}
 
-    public func reloadData() {
+// MARK: - Public Methods
+public extension InfiniteScrollView {
+    func reloadData() {
         guard isReloading == false else {
             return
         }
@@ -127,11 +130,11 @@ open class InfiniteScrollView: UIScrollView {
         isReloading = false
     }
 
-    public func register<Cell: InfiniteScrollViewCell>(nib: UINib, for cellType: Cell.Type) {
+    func register<Cell: InfiniteScrollViewCell>(nib: UINib, for cellType: Cell.Type) {
         cellNibs[NSStringFromClass(cellType)] = nib
     }
 
-    public func dequeueReusableCell<Cell: InfiniteScrollViewCell>() -> Cell {
+    func dequeueReusableCell<Cell: InfiniteScrollViewCell>() -> Cell {
         let cell: Cell
         if let dequeuedCell = queuingCells.first(where: { $0 is Cell }) as? Cell {
             queuingCells.remove(dequeuedCell)
@@ -151,6 +154,7 @@ open class InfiniteScrollView: UIScrollView {
     }
 }
 
+// MARK: - Private Methods
 private extension InfiniteScrollView {
     func setup() {
         showsVerticalScrollIndicator = false
